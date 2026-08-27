@@ -19,7 +19,6 @@ st.set_page_config(
 # ==========================================
 ADMIN_PASSWORD_HASH = hashlib.sha256("rnflrnfl".encode()).hexdigest()
 
-# 세션 상태 초기화 (한 번 인증되면 세션 동안 유지됨)
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
@@ -45,7 +44,6 @@ if not st.session_state.authenticated:
         """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # 엔터 키 입력 시 자동 로그인 처리
         st.text_input("접속 비밀번호를 입력하세요", type="password", key="password_input", on_change=check_password)
         if st.button("🔑 로그인", use_container_width=True, type="primary"):
             check_password()
@@ -96,13 +94,16 @@ st.markdown("""
         margin-bottom: 10px;
     }
     
-    /* 방문 회차 카드 스타일 */
-    .visit-card {
-        background-color: #F8FAFC;
-        border: 1.5px solid #E2E8F0;
-        border-radius: 10px;
-        padding: 15px;
-        margin-bottom: 15px;
+    /* 삭제 확인 경고 박스 */
+    .delete-warning-box {
+        background-color: #FEF2F2;
+        border: 1.5px solid #FCA5A5;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
+        color: #991B1B;
+        font-weight: bold;
+        font-size: 14px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -255,7 +256,6 @@ with col_left:
                             f.write(uf.getbuffer())
                         photo_paths.append(filepath)
 
-                # 새로운 방문 기록 객체 생성
                 new_visit = {
                     "visit_id": str(uuid.uuid4().hex),
                     "date": visit_date.strftime("%Y-%m-%d"),
@@ -266,7 +266,6 @@ with col_left:
 
                 cleaned_phone = format_phone(phone)
                 
-                # 동일한 고객(이름 + 연락처 기준)이 이미 존재하는지 확인
                 existing_customer = None
                 for c in st.session_state.customers:
                     if c["name"].strip() == name.strip() and c["phone"] == cleaned_phone:
@@ -353,21 +352,65 @@ with col_right:
                                 st.info("추가할 사진을 올려주세요.")
 
                     with v_btn2:
-                        if st.button(f"🗑️ 이 방문 기록 삭제", key=f"del_v_{visit['visit_id']}", type="secondary", use_container_width=True):
-                            customer["visits"] = [v for v in customer["visits"] if v["visit_id"] != visit["visit_id"]]
-                            if not customer["visits"]:
-                                st.session_state.customers = [c for c in st.session_state.customers if c["id"] != customer["id"]]
-                            save_data(st.session_state.customers)
-                            st.warning("선택한 방문 기록이 삭제되었습니다.")
-                            st.rerun()
+                        # 방문 기록 삭제 토글 상태 키 관리
+                        del_visit_state_key = f"confirm_del_v_{visit['visit_id']}"
+                        if del_visit_state_key not in st.session_state:
+                            st.session_state[del_visit_state_key] = False
+
+                        if not st.session_state[del_visit_state_key]:
+                            if st.button(f"🗑️ 이 방문 기록 삭제", key=f"del_v_btn_{visit['visit_id']}", type="secondary", use_container_width=True):
+                                st.session_state[del_visit_state_key] = True
+                                st.rerun()
+                        else:
+                            st.markdown(f"""
+                                <div class="delete-warning-box">
+                                    ⚠️ [{visit['date']}] 기록을 삭제하시겠습니까?
+                                </div>
+                            """, unsafe_allow_html=True)
+                            y_col, n_col = st.columns(2)
+                            with y_col:
+                                if st.button("✔️ 예 (삭제)", key=f"yes_del_v_{visit['visit_id']}", type="primary", use_container_width=True):
+                                    customer["visits"] = [v for v in customer["visits"] if v["visit_id"] != visit["visit_id"]]
+                                    if not customer["visits"]:
+                                        st.session_state.customers = [c for c in st.session_state.customers if c["id"] != customer["id"]]
+                                    save_data(st.session_state.customers)
+                                    st.session_state[del_visit_state_key] = False
+                                    st.success("삭제되었습니다.")
+                                    st.rerun()
+                            with n_col:
+                                if st.button("❌ 아니요", key=f"no_del_v_{visit['visit_id']}", use_container_width=True):
+                                    st.session_state[del_visit_state_key] = False
+                                    st.rerun()
 
                     if v_idx < len(visits_sorted) - 1:
                         st.markdown("---")
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                if st.button(f"🚨 고객 전체 정보 삭제 ({customer['name']})", key=f"del_all_{customer['id']}", type="secondary", use_container_width=True):
-                    st.session_state.customers = [c for c in st.session_state.customers if c["id"] != customer["id"]]
-                    save_data(st.session_state.customers)
-                    st.warning("고객의 모든 정보가 삭제되었습니다.")
-                    st.rerun()
+                # 전체 고객 삭제 토글 상태 키 관리
+                del_all_state_key = f"confirm_del_all_{customer['id']}"
+                if del_all_state_key not in st.session_state:
+                    st.session_state[del_all_state_key] = False
+
+                if not st.session_state[del_all_state_key]:
+                    if st.button(f"🚨 고객 전체 정보 삭제 ({customer['name']})", key=f"del_all_btn_{customer['id']}", type="secondary", use_container_width=True):
+                        st.session_state[del_all_state_key] = True
+                        st.rerun()
+                else:
+                    st.markdown(f"""
+                        <div class="delete-warning-box">
+                            🚨 '{customer['name']}' 님의 모든 방문 기록과 사진이 영구 삭제됩니다. 정말 삭제하시겠습니까?
+                        </div>
+                    """, unsafe_allow_html=True)
+                    ya_col, na_col = st.columns(2)
+                    with ya_col:
+                        if st.button("✔️ 예 (전체 삭제)", key=f"yes_del_all_{customer['id']}", type="primary", use_container_width=True):
+                            st.session_state.customers = [c for c in st.session_state.customers if c["id"] != customer["id"]]
+                            save_data(st.session_state.customers)
+                            st.session_state[del_all_state_key] = False
+                            st.warning("고객의 모든 정보가 삭제되었습니다.")
+                            st.rerun()
+                    with na_col:
+                        if st.button("❌ 아니요", key=f"no_del_all_{customer['id']}", use_container_width=True):
+                            st.session_state[del_all_state_key] = False
+                            st.rerun()
