@@ -15,10 +15,11 @@ st.set_page_config(
 )
 
 # ==========================================
-# 로그인 인증 관리 (보안 설정)
+# 로그인 인증 관리 (새로고침 유지 보완)
 # ==========================================
 ADMIN_PASSWORD_HASH = hashlib.sha256("rnflrnfl".encode()).hexdigest()
 
+# 세션 상태 초기화 (한 번 인증되면 세션 동안 유지됨)
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
@@ -44,6 +45,7 @@ if not st.session_state.authenticated:
         """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
         
+        # 엔터 키 입력 시 자동 로그인 처리
         st.text_input("접속 비밀번호를 입력하세요", type="password", key="password_input", on_change=check_password)
         if st.button("🔑 로그인", use_container_width=True, type="primary"):
             check_password()
@@ -113,7 +115,6 @@ def load_data():
                 data = json.load(f)
                 for c in data:
                     if "visits" not in c:
-                        # 기존 구버전 단일 데이터 구조를 신규 다중 방문 구조로 자동 마이그레이션
                         c["visits"] = [{
                             "visit_id": str(uuid.uuid4().hex),
                             "date": c.get("date", "2026-01-01"),
@@ -273,10 +274,8 @@ with col_left:
                         break
 
                 if existing_customer:
-                    # 기존 고객이 있으면 방문 기록 리스트에 최신순으로 추가
                     existing_customer["visits"].insert(0, new_visit)
                 else:
-                    # 신규 고객 생성
                     new_customer = {
                         "id": int(datetime.now().timestamp() * 1000),
                         "name": name.strip(),
@@ -312,24 +311,19 @@ with col_right:
             
             with st.expander(header_label):
                 visits = customer.get("visits", [])
-                
-                # 방문 날짜별로 정렬 (최신순)
                 visits_sorted = sorted(visits, key=lambda x: x["date"], reverse=True)
                 
                 for v_idx, visit in enumerate(visits_sorted):
                     st.markdown(f"#### 📅 방문 날짜: {visit['date']}")
                     st.markdown(f"**📌 시술 항목:** {visit.get('services') or '선택 항목 없음'}")
                     
-                    # 메모 표시 박스
                     memo_content = visit.get("memo", "").strip()
                     display_memo = memo_content if memo_content else "작성된 특이사항이 없습니다."
                     st.markdown(f'<div class="memo-display-box">{display_memo}</div>', unsafe_allow_html=True)
 
-                    # 해당 날짜 메모 수정 버튼
                     if st.button(f"✏️ [{visit['date']}] 메모 수정", key=f"edit_v_{visit['visit_id']}", use_container_width=True):
                         edit_visit_memo_dialog(customer["name"], visit)
 
-                    # 사진 영역 (크기 및 레이아웃 유지)
                     photos = visit.get("photos", [])
                     if photos:
                         st.markdown(f"**📷 [{visit['date']}] 작업 사진**")
@@ -360,10 +354,8 @@ with col_right:
 
                     with v_btn2:
                         if st.button(f"🗑️ 이 방문 기록 삭제", key=f"del_v_{visit['visit_id']}", type="secondary", use_container_width=True):
-                            # 해당 방문 회차 제거
                             customer["visits"] = [v for v in customer["visits"] if v["visit_id"] != visit["visit_id"]]
                             if not customer["visits"]:
-                                # 방문 기록이 전부 지워지면 고객 전체 카드 삭제
                                 st.session_state.customers = [c for c in st.session_state.customers if c["id"] != customer["id"]]
                             save_data(st.session_state.customers)
                             st.warning("선택한 방문 기록이 삭제되었습니다.")
@@ -374,7 +366,6 @@ with col_right:
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 
-                # 전체 고객 삭제 버튼
                 if st.button(f"🚨 고객 전체 정보 삭제 ({customer['name']})", key=f"del_all_{customer['id']}", type="secondary", use_container_width=True):
                     st.session_state.customers = [c for c in st.session_state.customers if c["id"] != customer["id"]]
                     save_data(st.session_state.customers)
