@@ -86,12 +86,21 @@ st.markdown("""
         border: 1px solid #BAE6FD;
         border-radius: 8px;
         padding: 15px;
-        min-height: 180px;
+        min-height: 160px;
         white-space: pre-wrap;
         color: #333333;
         font-size: 14px;
         line-height: 1.6;
-        margin-bottom: 12px;
+        margin-bottom: 10px;
+    }
+    
+    /* 방문 회차 카드 스타일 */
+    .visit-card {
+        background-color: #F8FAFC;
+        border: 1.5px solid #E2E8F0;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 15px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -103,8 +112,15 @@ def load_data():
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 for c in data:
-                    if "photos" not in c:
-                        c["photos"] = []
+                    if "visits" not in c:
+                        # 기존 구버전 단일 데이터 구조를 신규 다중 방문 구조로 자동 마이그레이션
+                        c["visits"] = [{
+                            "visit_id": str(uuid.uuid4().hex),
+                            "date": c.get("date", "2026-01-01"),
+                            "services": c.get("services", ""),
+                            "memo": c.get("memo", ""),
+                            "photos": c.get("photos", [])
+                        }]
                 return data
         except Exception:
             return []
@@ -135,28 +151,27 @@ def auto_format_phone_callback():
     if key in st.session_state:
         st.session_state[key] = format_phone(st.session_state[key])
 
-# 메모 수정용 자동 닫힘 모달 (Dialog)
-@st.dialog("📝 특이사항 메모 수정", width="large")
-def edit_memo_dialog(customer):
-    st.caption(f"👤 **{customer['name']}** 님의 특이사항 메모를 수정합니다.")
+# 특정 방문 회차 메모 수정 모달 (Dialog)
+@st.dialog("📝 방문 기록 메모 수정", width="large")
+def edit_visit_memo_dialog(customer_name, visit):
+    st.caption(f"👤 **{customer_name}** 님의 ({visit['date']}) 방문 특이사항 메모를 수정합니다.")
     
-    # 크게 확장된 메모 작성 박스 (높이 350px 고정)
     edited_memo = st.text_area(
         "메모 내용", 
-        value=customer.get("memo", ""), 
+        value=visit.get("memo", ""), 
         height=350, 
-        key=f"dialog_memo_{customer['id']}"
+        key=f"dialog_visit_memo_{visit['visit_id']}"
     )
     
     col_save, col_close = st.columns([1, 1])
     with col_save:
         if st.button("💾 수정 내용 저장", type="primary", use_container_width=True):
-            customer["memo"] = edited_memo.strip()
+            visit["memo"] = edited_memo.strip()
             save_data(st.session_state.customers)
-            st.rerun()  # 저장 시 즉시 모달이 자동으로 닫히며 화면 반영
+            st.rerun()
     with col_close:
         if st.button("❌ 취소", use_container_width=True):
-            st.rerun()  # 취소 시 모달 닫힘
+            st.rerun()
 
 # 상단 헤더 및 로그아웃 버튼
 h_col1, h_col2 = st.columns([5, 1])
@@ -239,21 +254,40 @@ with col_left:
                             f.write(uf.getbuffer())
                         photo_paths.append(filepath)
 
-                new_customer = {
-                    "id": int(datetime.now().timestamp() * 1000),
+                # 새로운 방문 기록 객체 생성
+                new_visit = {
+                    "visit_id": str(uuid.uuid4().hex),
                     "date": visit_date.strftime("%Y-%m-%d"),
-                    "name": name.strip(),
-                    "phone": format_phone(phone),
                     "services": ", ".join(selected_services),
                     "memo": memo.strip(),
                     "photos": photo_paths
                 }
 
-                st.session_state.customers.insert(0, new_customer)
-                save_data(st.session_state.customers)
+                cleaned_phone = format_phone(phone)
                 
+                # 동일한 고객(이름 + 연락처 기준)이 이미 존재하는지 확인
+                existing_customer = None
+                for c in st.session_state.customers:
+                    if c["name"].strip() == name.strip() and c["phone"] == cleaned_phone:
+                        existing_customer = c
+                        break
+
+                if existing_customer:
+                    # 기존 고객이 있으면 방문 기록 리스트에 최신순으로 추가
+                    existing_customer["visits"].insert(0, new_visit)
+                else:
+                    # 신규 고객 생성
+                    new_customer = {
+                        "id": int(datetime.now().timestamp() * 1000),
+                        "name": name.strip(),
+                        "phone": cleaned_phone,
+                        "visits": [new_visit]
+                    }
+                    st.session_state.customers.insert(0, new_customer)
+
+                save_data(st.session_state.customers)
                 st.session_state.reg_key_version += 1
-                st.success("고객 정보가 저장되었습니다!")
+                st.success("고객 방문 기록이 저장되었습니다!")
                 st.rerun()
 
 # [오른쪽] 고객 방문 기록 및 관리
@@ -273,58 +307,76 @@ with col_right:
         st.info("등록된 기록이 없습니다.")
     else:
         for customer in filtered_customers:
-            header_label = f"📅 {customer['date']} | 👤 {customer['name']} ({customer['phone']})"
+            total_visits = len(customer.get("visits", []))
+            header_label = f"👤 {customer['name']} ({customer['phone']}) — 총 방문 {total_visits}회"
             
             with st.expander(header_label):
-                # 시술 항목 표시
-                st.markdown(f"**📌 시술 항목:** {customer.get('services') or '선택 항목 없음'}")
-                st.markdown("---")
-
-                # 특이사항 메모 표시 영역
-                st.markdown("**📝 고객 특이사항 메모**")
-                memo_content = customer.get("memo", "").strip()
-                display_memo = memo_content if memo_content else "작성된 특이사항이 없습니다."
+                visits = customer.get("visits", [])
                 
-                st.markdown(f'<div class="memo-display-box">{display_memo}</div>', unsafe_allow_html=True)
+                # 방문 날짜별로 정렬 (최신순)
+                visits_sorted = sorted(visits, key=lambda x: x["date"], reverse=True)
+                
+                for v_idx, visit in enumerate(visits_sorted):
+                    st.markdown(f"#### 📅 방문 날짜: {visit['date']}")
+                    st.markdown(f"**📌 시술 항목:** {visit.get('services') or '선택 항목 없음'}")
+                    
+                    # 메모 표시 박스
+                    memo_content = visit.get("memo", "").strip()
+                    display_memo = memo_content if memo_content else "작성된 특이사항이 없습니다."
+                    st.markdown(f'<div class="memo-display-box">{display_memo}</div>', unsafe_allow_html=True)
 
-                # 클릭 시 모달창이 열리는 수정 버튼
-                if st.button("✏️ 특이사항 메모 수정", key=f"btn_edit_modal_{customer['id']}", use_container_width=True):
-                    edit_memo_dialog(customer)
+                    # 해당 날짜 메모 수정 버튼
+                    if st.button(f"✏️ [{visit['date']}] 메모 수정", key=f"edit_v_{visit['visit_id']}", use_container_width=True):
+                        edit_visit_memo_dialog(customer["name"], visit)
+
+                    # 사진 영역 (크기 및 레이아웃 유지)
+                    photos = visit.get("photos", [])
+                    if photos:
+                        st.markdown(f"**📷 [{visit['date']}] 작업 사진**")
+                        p_cols = st.columns(3)
+                        for idx, ppath in enumerate(photos):
+                            if os.path.exists(ppath):
+                                with p_cols[idx % 3]:
+                                    st.image(ppath, use_container_width=True)
+
+                    add_files = st.file_uploader(f"➕ [{visit['date']}] 사진 추가", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key=f"add_p_{visit['visit_id']}")
+
+                    v_btn1, v_btn2 = st.columns([1, 1])
+                    with v_btn1:
+                        if st.button(f"📷 사진 저장", key=f"save_p_{visit['visit_id']}", use_container_width=True):
+                            if add_files:
+                                for uf in add_files:
+                                    file_ext = os.path.splitext(uf.name)[1]
+                                    filename = f"{uuid.uuid4().hex}{file_ext}"
+                                    filepath = os.path.join(UPLOAD_DIR, filename)
+                                    with open(filepath, "wb") as f:
+                                        f.write(uf.getbuffer())
+                                    visit["photos"].append(filepath)
+                                save_data(st.session_state.customers)
+                                st.success("사진이 추가되었습니다!")
+                                st.rerun()
+                            else:
+                                st.info("추가할 사진을 올려주세요.")
+
+                    with v_btn2:
+                        if st.button(f"🗑️ 이 방문 기록 삭제", key=f"del_v_{visit['visit_id']}", type="secondary", use_container_width=True):
+                            # 해당 방문 회차 제거
+                            customer["visits"] = [v for v in customer["visits"] if v["visit_id"] != visit["visit_id"]]
+                            if not customer["visits"]:
+                                # 방문 기록이 전부 지워지면 고객 전체 카드 삭제
+                                st.session_state.customers = [c for c in st.session_state.customers if c["id"] != customer["id"]]
+                            save_data(st.session_state.customers)
+                            st.warning("선택한 방문 기록이 삭제되었습니다.")
+                            st.rerun()
+
+                    if v_idx < len(visits_sorted) - 1:
+                        st.markdown("---")
 
                 st.markdown("<br>", unsafe_allow_html=True)
-
-                # 사진 등록 영역 (크기 및 레이아웃 유지)
-                photos = customer.get("photos", [])
-                if photos:
-                    st.markdown("**📷 등록된 작업 사진**")
-                    p_cols = st.columns(3)
-                    for idx, ppath in enumerate(photos):
-                        if os.path.exists(ppath):
-                            with p_cols[idx % 3]:
-                                st.image(ppath, use_container_width=True)
-
-                add_files = st.file_uploader("➕ 사진 추가 첨부", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key=f"add_p_{customer['id']}")
-
-                b_col1, b_col2 = st.columns([1, 1])
-                with b_col1:
-                    if st.button("📷 사진 추가 저장", key=f"save_photo_{customer['id']}", use_container_width=True):
-                        if add_files:
-                            for uf in add_files:
-                                file_ext = os.path.splitext(uf.name)[1]
-                                filename = f"{uuid.uuid4().hex}{file_ext}"
-                                filepath = os.path.join(UPLOAD_DIR, filename)
-                                with open(filepath, "wb") as f:
-                                    f.write(uf.getbuffer())
-                                customer["photos"].append(filepath)
-                            save_data(st.session_state.customers)
-                            st.success("사진이 추가되었습니다!")
-                            st.rerun()
-                        else:
-                            st.info("추가할 사진을 먼저 올려주세요.")
-
-                with b_col2:
-                    if st.button("🗑️ 기록 삭제", key=f"del_{customer['id']}", type="secondary", use_container_width=True):
-                        st.session_state.customers = [c for c in st.session_state.customers if c["id"] != customer["id"]]
-                        save_data(st.session_state.customers)
-                        st.warning("삭제 완료되었습니다.")
-                        st.rerun()
+                
+                # 전체 고객 삭제 버튼
+                if st.button(f"🚨 고객 전체 정보 삭제 ({customer['name']})", key=f"del_all_{customer['id']}", type="secondary", use_container_width=True):
+                    st.session_state.customers = [c for c in st.session_state.customers if c["id"] != customer["id"]]
+                    save_data(st.session_state.customers)
+                    st.warning("고객의 모든 정보가 삭제되었습니다.")
+                    st.rerun()
