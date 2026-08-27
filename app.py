@@ -135,6 +135,29 @@ def auto_format_phone_callback():
     if key in st.session_state:
         st.session_state[key] = format_phone(st.session_state[key])
 
+# 메모 수정용 자동 닫힘 모달 (Dialog)
+@st.dialog("📝 특이사항 메모 수정", width="large")
+def edit_memo_dialog(customer):
+    st.caption(f"👤 **{customer['name']}** 님의 특이사항 메모를 수정합니다.")
+    
+    # 크게 확장된 메모 작성 박스 (높이 350px 고정)
+    edited_memo = st.text_area(
+        "메모 내용", 
+        value=customer.get("memo", ""), 
+        height=350, 
+        key=f"dialog_memo_{customer['id']}"
+    )
+    
+    col_save, col_close = st.columns([1, 1])
+    with col_save:
+        if st.button("💾 수정 내용 저장", type="primary", use_container_width=True):
+            customer["memo"] = edited_memo.strip()
+            save_data(st.session_state.customers)
+            st.rerun()  # 저장 시 즉시 모달이 자동으로 닫히며 화면 반영
+    with col_close:
+        if st.button("❌ 취소", use_container_width=True):
+            st.rerun()  # 취소 시 모달 닫힘
+
 # 상단 헤더 및 로그아웃 버튼
 h_col1, h_col2 = st.columns([5, 1])
 with h_col1:
@@ -253,7 +276,7 @@ with col_right:
             header_label = f"📅 {customer['date']} | 👤 {customer['name']} ({customer['phone']})"
             
             with st.expander(header_label):
-                # 시술 항목 표시 (수정 불가, 명확히 표시)
+                # 시술 항목 표시
                 st.markdown(f"**📌 시술 항목:** {customer.get('services') or '선택 항목 없음'}")
                 st.markdown("---")
 
@@ -264,28 +287,13 @@ with col_right:
                 
                 st.markdown(f'<div class="memo-display-box">{display_memo}</div>', unsafe_allow_html=True)
 
-                # 수정 전용 UI 열기 (Popover 방식)
-                with st.popover("✏️ 특이사항 메모 수정하기", use_container_width=True):
-                    st.markdown("### 📝 특이사항 메모 편집")
-                    st.caption("아래 박스에서 특이사항을 시원하게 작성하고 저장 버튼을 눌러주세요.")
-                    
-                    # 크게 확장된 메모 작성 박스 (높이 350px 고정)
-                    edited_memo = st.text_area(
-                        "메모 내용", 
-                        value=customer.get("memo", ""), 
-                        height=350, 
-                        key=f"edit_memo_input_{customer['id']}"
-                    )
-                    
-                    if st.button("💾 메모 수정 저장", key=f"save_memo_btn_{customer['id']}", type="primary", use_container_width=True):
-                        customer["memo"] = edited_memo.strip()
-                        save_data(st.session_state.customers)
-                        st.success("특이사항이 수정되었습니다!")
-                        st.rerun()
+                # 클릭 시 모달창이 열리는 수정 버튼
+                if st.button("✏️ 특이사항 메모 수정", key=f"btn_edit_modal_{customer['id']}", use_container_width=True):
+                    edit_memo_dialog(customer)
 
                 st.markdown("<br>", unsafe_allow_html=True)
 
-                # 사진 등록 영역 (크기 및 레이아웃 절대 수정 안함)
+                # 사진 등록 영역 (크기 및 레이아웃 유지)
                 photos = customer.get("photos", [])
                 if photos:
                     st.markdown("**📷 등록된 작업 사진**")
