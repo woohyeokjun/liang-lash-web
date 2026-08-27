@@ -60,7 +60,7 @@ DATA_FILE = "customers.json"
 UPLOAD_DIR = "uploaded_photos"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Custom CSS 적용 (메모 박스 드래그 변형 금지 및 팝오버 내부 스크롤 설정)
+# Custom CSS 적용 (메모 박스 크기 고정 및 뷰어 스타일)
 st.markdown("""
     <style>
     .main { background-color: #F0F9FF; }
@@ -75,16 +75,23 @@ st.markdown("""
     .sub-title { color: #0284C7; font-size: 13px; font-weight: bold; margin-top: 4px; }
     .stButton>button { border-radius: 8px; font-weight: bold; }
     
-    /* 특이사항 메모 박스 드래그 변형 금지 (크기 고정) */
+    /* 메모 입력창 드래그 크기 조절 금지 (고정) */
     textarea {
         resize: none !important;
     }
 
-    /* 시술 선택 팝오버 메뉴 내부 스크롤 적용 */
-    [data-testid="stPopoverBody"] {
-        max-height: 350px !important;
-        overflow-y: auto !important;
-        padding-right: 10px;
+    /* 메모 보기 전용 스타일 박스 */
+    .memo-display-box {
+        background-color: #FFFFFF;
+        border: 1px solid #BAE6FD;
+        border-radius: 8px;
+        padding: 15px;
+        min-height: 180px;
+        white-space: pre-wrap;
+        color: #333333;
+        font-size: 14px;
+        line-height: 1.6;
+        margin-bottom: 12px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -186,7 +193,7 @@ with col_left:
         else:
             st.caption("선택된 시술 항목이 없습니다.")
 
-        memo = st.text_area("시술 메모 및 특이사항", placeholder="특이사항을 입력하세요", height=180, key=f"reg_memo_{reg_v}")
+        memo = st.text_area("시술 메모 및 특이사항", placeholder="특이사항을 입력하세요", height=200, key=f"reg_memo_{reg_v}")
 
         uploaded_files = st.file_uploader(
             "📷 작업 사진 첨부", 
@@ -246,34 +253,39 @@ with col_right:
             header_label = f"📅 {customer['date']} | 👤 {customer['name']} ({customer['phone']})"
             
             with st.expander(header_label):
-                st.markdown("**✂️ 시술 항목 수정**")
+                # 시술 항목 표시 (수정 불가, 명확히 표시)
+                st.markdown(f"**📌 시술 항목:** {customer.get('services') or '선택 항목 없음'}")
+                st.markdown("---")
+
+                # 특이사항 메모 표시 영역
+                st.markdown("**📝 고객 특이사항 메모**")
+                memo_content = customer.get("memo", "").strip()
+                display_memo = memo_content if memo_content else "작성된 특이사항이 없습니다."
                 
-                # 기존 저장되어 있던 시술 항목들을 기본 선택값으로 파싱
-                current_services_str = customer.get("services", "")
-                current_services_list = [s.strip() for s in current_services_str.split(",") if s.strip()]
-                
-                edited_services = []
-                # 팝오버 창 내부 스크롤 적용됨 (CSS에서 max-height 350px 설정)
-                with st.popover("💖 시술 항목 변경하기", use_container_width=True):
-                    for category, items in MENU_DATA.items():
-                        default_selected = [item for item in items if item in current_services_list]
-                        selected = st.multiselect(
-                            category, 
-                            options=items, 
-                            default=default_selected, 
-                            key=f"edit_menu_{category}_{customer['id']}"
-                        )
-                        edited_services.extend(selected)
+                st.markdown(f'<div class="memo-display-box">{display_memo}</div>', unsafe_allow_html=True)
 
-                if edited_services:
-                    st.info(f"📌 **현재 시술:** {', '.join(edited_services)}")
-                else:
-                    st.caption("선택된 시술 항목이 없습니다.")
+                # 수정 전용 UI 열기 (Popover 방식)
+                with st.popover("✏️ 특이사항 메모 수정하기", use_container_width=True):
+                    st.markdown("### 📝 특이사항 메모 편집")
+                    st.caption("아래 박스에서 특이사항을 시원하게 작성하고 저장 버튼을 눌러주세요.")
+                    
+                    # 크게 확장된 메모 작성 박스 (높이 350px 고정)
+                    edited_memo = st.text_area(
+                        "메모 내용", 
+                        value=customer.get("memo", ""), 
+                        height=350, 
+                        key=f"edit_memo_input_{customer['id']}"
+                    )
+                    
+                    if st.button("💾 메모 수정 저장", key=f"save_memo_btn_{customer['id']}", type="primary", use_container_width=True):
+                        customer["memo"] = edited_memo.strip()
+                        save_data(st.session_state.customers)
+                        st.success("특이사항이 수정되었습니다!")
+                        st.rerun()
 
-                # 특이사항 메모 (크기 확장 150 + 크기 고정)
-                edit_memo = st.text_area("특이사항 메모", value=customer.get("memo", ""), key=f"memo_{customer['id']}", height=150)
+                st.markdown("<br>", unsafe_allow_html=True)
 
-                # 사진 등록 영역 (크기 및 레이아웃 유지)
+                # 사진 등록 영역 (크기 및 레이아웃 절대 수정 안함)
                 photos = customer.get("photos", [])
                 if photos:
                     st.markdown("**📷 등록된 작업 사진**")
@@ -283,13 +295,11 @@ with col_right:
                             with p_cols[idx % 3]:
                                 st.image(ppath, use_container_width=True)
 
-                add_files = st.file_uploader("➕ 사진 추가", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key=f"add_p_{customer['id']}")
+                add_files = st.file_uploader("➕ 사진 추가 첨부", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key=f"add_p_{customer['id']}")
 
                 b_col1, b_col2 = st.columns([1, 1])
                 with b_col1:
-                    if st.button("💾 수정 사항 저장", key=f"save_{customer['id']}", use_container_width=True):
-                        customer["services"] = ", ".join(edited_services)
-                        customer["memo"] = edit_memo.strip()
+                    if st.button("📷 사진 추가 저장", key=f"save_photo_{customer['id']}", use_container_width=True):
                         if add_files:
                             for uf in add_files:
                                 file_ext = os.path.splitext(uf.name)[1]
@@ -298,10 +308,11 @@ with col_right:
                                 with open(filepath, "wb") as f:
                                     f.write(uf.getbuffer())
                                 customer["photos"].append(filepath)
-                        
-                        save_data(st.session_state.customers)
-                        st.success("수정 완료되었습니다!")
-                        st.rerun()
+                            save_data(st.session_state.customers)
+                            st.success("사진이 추가되었습니다!")
+                            st.rerun()
+                        else:
+                            st.info("추가할 사진을 먼저 올려주세요.")
 
                 with b_col2:
                     if st.button("🗑️ 기록 삭제", key=f"del_{customer['id']}", type="secondary", use_container_width=True):
