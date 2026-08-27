@@ -17,7 +17,6 @@ st.set_page_config(
 # ==========================================
 # 로그인 인증 관리 (보안 설정)
 # ==========================================
-# 원장님의 접속 비밀번호를 설정하세요 (초기 비밀번호: 1234)
 ADMIN_PASSWORD_HASH = hashlib.sha256("rnflrnfl".encode()).hexdigest()
 
 if "authenticated" not in st.session_state:
@@ -50,7 +49,7 @@ if not st.session_state.authenticated:
             check_password()
             if st.session_state.authenticated:
                 st.rerun()
-    st.stop()  # 로그인 성공 전까지 아래 메인 시스템 실행 중단
+    st.stop()
 
 # ==========================================
 # 메인 시스템 시작 (로그인 성공 시 접근)
@@ -61,7 +60,7 @@ DATA_FILE = "customers.json"
 UPLOAD_DIR = "uploaded_photos"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Custom CSS 적용
+# Custom CSS 적용 (메모 박스 드래그 변형 금지 및 팝오버 내부 스크롤 설정)
 st.markdown("""
     <style>
     .main { background-color: #F0F9FF; }
@@ -75,6 +74,18 @@ st.markdown("""
     .main-title { color: #0369A1; font-weight: bold; font-size: 28px; margin: 0; }
     .sub-title { color: #0284C7; font-size: 13px; font-weight: bold; margin-top: 4px; }
     .stButton>button { border-radius: 8px; font-weight: bold; }
+    
+    /* 특이사항 메모 박스 드래그 변형 금지 (크기 고정) */
+    textarea {
+        resize: none !important;
+    }
+
+    /* 시술 선택 팝오버 메뉴 내부 스크롤 적용 */
+    [data-testid="stPopoverBody"] {
+        max-height: 350px !important;
+        overflow-y: auto !important;
+        padding-right: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -175,7 +186,7 @@ with col_left:
         else:
             st.caption("선택된 시술 항목이 없습니다.")
 
-        memo = st.text_area("시술 메모 및 특이사항", placeholder="특이사항을 입력하세요", height=100, key=f"reg_memo_{reg_v}")
+        memo = st.text_area("시술 메모 및 특이사항", placeholder="특이사항을 입력하세요", height=180, key=f"reg_memo_{reg_v}")
 
         uploaded_files = st.file_uploader(
             "📷 작업 사진 첨부", 
@@ -235,10 +246,34 @@ with col_right:
             header_label = f"📅 {customer['date']} | 👤 {customer['name']} ({customer['phone']})"
             
             with st.expander(header_label):
-                st.markdown(f"**시술 선택 항목:** {customer.get('services') or '선택 항목 없음'}")
+                st.markdown("**✂️ 시술 항목 수정**")
                 
-                edit_memo = st.text_area("특이사항 메모", value=customer.get("memo", ""), key=f"memo_{customer['id']}", height=80)
+                # 기존 저장되어 있던 시술 항목들을 기본 선택값으로 파싱
+                current_services_str = customer.get("services", "")
+                current_services_list = [s.strip() for s in current_services_str.split(",") if s.strip()]
+                
+                edited_services = []
+                # 팝오버 창 내부 스크롤 적용됨 (CSS에서 max-height 350px 설정)
+                with st.popover("💖 시술 항목 변경하기", use_container_width=True):
+                    for category, items in MENU_DATA.items():
+                        default_selected = [item for item in items if item in current_services_list]
+                        selected = st.multiselect(
+                            category, 
+                            options=items, 
+                            default=default_selected, 
+                            key=f"edit_menu_{category}_{customer['id']}"
+                        )
+                        edited_services.extend(selected)
 
+                if edited_services:
+                    st.info(f"📌 **현재 시술:** {', '.join(edited_services)}")
+                else:
+                    st.caption("선택된 시술 항목이 없습니다.")
+
+                # 특이사항 메모 (크기 확장 150 + 크기 고정)
+                edit_memo = st.text_area("특이사항 메모", value=customer.get("memo", ""), key=f"memo_{customer['id']}", height=150)
+
+                # 사진 등록 영역 (크기 및 레이아웃 유지)
                 photos = customer.get("photos", [])
                 if photos:
                     st.markdown("**📷 등록된 작업 사진**")
@@ -253,6 +288,7 @@ with col_right:
                 b_col1, b_col2 = st.columns([1, 1])
                 with b_col1:
                     if st.button("💾 수정 사항 저장", key=f"save_{customer['id']}", use_container_width=True):
+                        customer["services"] = ", ".join(edited_services)
                         customer["memo"] = edit_memo.strip()
                         if add_files:
                             for uf in add_files:
